@@ -1,0 +1,296 @@
+:root {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #111318;
+  color: #e2e8f0;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid #2c3440;
+  padding: 12px 16px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.topbar p {
+  margin: 6px 0 0;
+  color: #94a3b8;
+}
+
+.topbar-link {
+  color: #93c5fd;
+  text-decoration: none;
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.topbar-link:hover {
+  text-decoration: underline;
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.panel {
+  border: 1px solid #2c3440;
+  border-radius: 8px;
+  background: #181c24;
+  padding: 10px;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+input,
+select,
+button {
+  background: #0f1218;
+  color: #e2e8f0;
+  border: 1px solid #2c3440;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  background: #202a38;
+}
+
+.status {
+  margin: 8px 0 0;
+  color: #93c5fd;
+}
+
+.progress-wrap {
+  margin-top: 8px;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid #2c3440;
+  background: #0f1218;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 120ms linear;
+}
+
+.progress-text {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #93a8c5;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  grid-template-areas: "img props canvas";
+  gap: 10px;
+  min-height: calc(100vh - 190px);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#imgColumn {
+  grid-area: img;
+}
+
+#propsColumn {
+  grid-area: props;
+}
+
+#canvasColumn {
+  grid-area: canvas;
+}
+
+.column.wide {
+  min-width: 0;
+}
+
+.column-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.column h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.export-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #2c3440;
+  border-radius: 6px;
+  overflow: auto;
+  min-height: 180px;
+}
+
+.list li {
+  border-bottom: 1px solid #2c3440;
+  padding: 6px 8px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.list li:hover {
+  background: #202a38;
+}
+
+.list li.active {
+  background: #253046;
+}
+
+.list li.folder-row {
+  color: #93a8c5;
+}
+
+.path {
+  margin: 0 0 8px;
+  color: #93a8c5;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.tree {
+  border: 1px solid #2c3440;
+  border-radius: 6px;
+  overflow: auto;
+  padding: 8px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  min-height: 280px;
+}
+
+#imageList {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#propertyTree {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tree ul {
+  list-style: none;
+  margin: 0 0 0 12px;
+  padding: 0;
+}
+
+.tree li {
+  margin: 2px 0;
+}
+
+.prop-type {
+  color: #a5b4fc;
+}
+
+.prop-name {
+  color: #f8fafc;
+}
+
+.prop-value {
+  color: #86efac;
+}
+
+#canvasPreview {
+  margin-top: 8px;
+  max-width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border: 1px solid #2c3440;
+  border-radius: 6px;
+  background: #0f1218;
+}
+
+#canvasList {
+  max-height: 260px;
+  overflow: auto;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1280px) {
+  .columns {
+    grid-template-columns: minmax(300px, 1fr) minmax(320px, 1fr);
+    grid-template-rows: minmax(260px, 1fr) minmax(260px, 1fr);
+    grid-template-areas:
+      "img canvas"
+      "props canvas";
+    height: calc(100vh - 190px);
+    min-height: 0;
+  }
+
+  #imgColumn,
+  #propsColumn,
+  #canvasColumn {
+    min-height: 0;
+  }
+
+  #imageList,
+  #propertyTree {
+    max-height: none;
+    min-height: 0;
+  }
+
+  #canvasList {
+    max-height: 45%;
+  }
+
+  #canvasPreview {
+    max-height: calc(55vh - 180px);
+  }
+}

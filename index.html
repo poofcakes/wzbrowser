@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>wzbrowser - MapleStory WZ Browser</title>
+    <meta
+      name="description"
+      content="wzbrowser is a browser-based MapleStory WZ file browser and inspector. Open local .wz files, explore IMG data, and export XML or PNG assets."
+    />
+    <meta
+      name="keywords"
+      content="wzbrowser, MapleStory, WZ browser, WZ explorer, WZ inspector, MapleStory tools"
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://wzbrowser.poofcakes.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="wzbrowser" />
+    <meta property="og:title" content="wzbrowser - MapleStory WZ Browser" />
+    <meta
+      property="og:description"
+      content="Open and browse MapleStory .wz files directly in your browser with no backend."
+    />
+    <meta property="og:url" content="https://wzbrowser.poofcakes.com/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="wzbrowser - MapleStory WZ Browser" />
+    <meta
+      name="twitter:description"
+      content="Open and browse MapleStory .wz files directly in your browser with no backend."
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>wzbrowser</h1>
+        <p>Browse WZ in your browser.</p>
+      </div>
+      <a
+        class="topbar-link"
+        href="https://github.com/poofcakes/wzbrowser"
+        target="_blank"
+        rel="noopener noreferrer"
+      >GitHub</a>
+    </header>
+    <main class="layout">
+      <section class="panel">
+        <h2>Load .wz File</h2>
+        <div class="controls">
+          <label>
+            WZ file
+            <input id="wzFileInput" type="file" accept=".wz" />
+          </label>
+          <label>
+            Version
+            <select id="versionSelect"></select>
+          </label>
+          <button id="openBtn" type="button">Open</button>
+        </div>
+        <p id="status" class="status">Initializing...</p>
+        <div id="parseProgressWrap" class="progress-wrap" hidden>
+          <div class="progress-bar-bg" aria-label="parse progress">
+            <div id="parseProgressBar" class="progress-bar-fill"></div>
+          </div>
+          <p id="parseProgressText" class="progress-text">Preparing parse...</p>
+        </div>
+      </section>
+
+      <section class="panel columns">
+        <div class="column" id="imgColumn">
+          <div class="column-header">
+            <h3>IMG Entries</h3>
+            <input id="imageFilterInput" type="text" placeholder="Filter image path" />
+          </div>
+          <ul id="imageList" class="list"></ul>
+        </div>
+
+        <div class="column wide" id="propsColumn">
+          <h3>Properties (selected .img)</h3>
+          <p id="selectedImage" class="path"></p>
+          <div class="export-actions">
+            <button id="downloadXmlBtn" type="button">Download XML</button>
+            <button id="downloadPngZipBtn" type="button">Download PNGs (zip)</button>
+          </div>
+          <div id="propertyTree" class="tree"></div>
+        </div>
+
+        <div class="column" id="canvasColumn">
+          <h3>Canvas Preview</h3>
+          <ul id="canvasList" class="list"></ul>
+          <p id="selectedCanvas" class="path"></p>
+          <img id="canvasPreview" alt="canvas preview" hidden />
+        </div>
+      </section>
+    </main>
+    <script src="./vendor/wz.js"></script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
