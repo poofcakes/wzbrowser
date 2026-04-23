@@ -9,6 +9,12 @@ Browser-only MapleStory `.wz` inspector that runs fully on static hosting.
 - Lazy parsing: opens one `.wz` at a time and parses selected `.img` on click.
 - Visual inspection: property tree + canvas preview.
 
+## Credits / Dependencies
+
+- WZ parsing runtime is powered by the browser `wz.js` build (MapleLib ecosystem/runtime used by this project).
+- UI styling in this static page is inspired by the Pxlkit template style:
+  [https://pxlkit.xyz/templates](https://pxlkit.xyz/templates)
+
 ## Local Development
 
 ```bash

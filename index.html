@@ -28,22 +28,34 @@
       name="twitter:description"
       content="Open and browse MapleStory .wz files directly in your browser with no backend."
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>wzbrowser</h1>
-        <p>Browse WZ in your browser.</p>
+    <header class="topbar panel-shell">
+      <div class="brand-wrap">
+        <div class="brand-row">
+          <h1>wzbrowser</h1>
+          <p class="brand-subtitle">Browse WZ in your browser.</p>
+        </div>
+        <p class="hero-subtitle brand-description">
+          Bring your own <code>.wz</code>, decode it in-browser, then extract XML and PNG files without uploading files.
+        </p>
       </div>
       <a
         class="topbar-link"
         href="https://github.com/poofcakes/wzbrowser"
         target="_blank"
         rel="noopener noreferrer"
-      >GitHub</a>
+      >View GitHub</a>
     </header>
     <main class="layout">
-      <section class="panel">
+      <section class="panel panel-shell">
         <h2>Load .wz File</h2>
         <div class="controls">
           <label>
@@ -65,11 +77,11 @@
         </div>
       </section>
 
-      <section class="panel columns">
+      <section class="panel columns panel-shell">
         <div class="column" id="imgColumn">
           <div class="column-header">
             <h3>IMG Entries</h3>
-            <input id="imageFilterInput" type="text" placeholder="Filter image path" />
+            <input id="imageFilterInput" type="text" placeholder="Filter IMG path" />
           </div>
           <ul id="imageList" class="list"></ul>
         </div>
@@ -92,6 +104,14 @@
         </div>
       </section>
     </main>
+    <footer class="site-footer">
+      <p>
+        Powered by
+        <a href="https://github.com/lastbattle/MapleLib" target="_blank" rel="noopener noreferrer">MapleLib</a>
+        and styled with inspiration from
+        <a href="https://pxlkit.xyz/templates" target="_blank" rel="noopener noreferrer">Pxlkit templates</a>.
+      </p>
+    </footer>
     <script src="./vendor/wz.js"></script>
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -1,5 +1,8 @@
-import "./styles.css";
 import JSZip from "jszip";
+import { canvasToPngBytes } from "./wz/canvas.js";
+import { collectCanvasProps, buildSelectedImageXml, formatValue, getPropertyChildren } from "./wz/properties.js";
+import { assertWasmEndpoint, getWzApi, installCanvasPatch, populateVersionSelect } from "./wz/runtime.js";
+import { downloadBlob, errorText, escapeHtml, sanitizeFileName } from "./utils/text.js";
 
 const wzFileInput = document.getElementById("wzFileInput");
 const versionSelect = document.getElementById("versionSelect");
@@ -19,8 +22,8 @@ const selectedCanvasEl = document.getElementById("selectedCanvas");
 const canvasPreviewEl = document.getElementById("canvasPreview");
 
 let currentWz = null;
-let imageEntries = [];
-let imageTreeRoot = null;
+let imageEntries = null;
+let imageRootNode = null;
 let expandedFolders = new Set();
 let selectedImagePath = "";
 let selectedImage = null;
@@ -28,6 +31,8 @@ let currentCanvasEntries = [];
 let selectedCanvasUrl = null;
 let wzApi = null;
 let parseProgressTimer = null;
+let imageIndexBuildPromise = null;
+let filterRenderToken = 0;
 
 boot().catch((err) => {
   status(`Init failed: ${errorText(err)}`);
@@ -46,80 +51,12 @@ async function boot() {
   installCanvasPatch(wzApi);
   downloadXmlBtn.disabled = true;
   downloadPngZipBtn.disabled = true;
-  populateVersionSelect();
+  populateVersionSelect(versionSelect, wzApi);
   status("Loading WebAssembly...");
   const wasmUrl = new URL("./vendor/wz.wasm", window.location.href).toString();
   await assertWasmEndpoint(wasmUrl);
   await wzApi.init();
   status("Ready. Choose one .wz file and click Open.");
-}
-
-function installCanvasPatch(api) {
-  const CanvasCtor = api?.Canvas;
-  if (!CanvasCtor || typeof CanvasCtor.prototype?.getBufferAsync !== "function") {
-    return;
-  }
-
-  if (CanvasCtor.prototype.__wzExplorerPatchedGetBufferAsync) {
-    return;
-  }
-
-  const original = CanvasCtor.prototype.getBufferAsync;
-  CanvasCtor.prototype.getBufferAsync = async function patchedGetBufferAsync(mime = "image/png") {
-    try {
-      return await original.call(this, mime);
-    } catch (_) {
-      const domCanvas =
-        this?._canvas ??
-        (typeof this?.getCanvas === "function" ? this.getCanvas() : this);
-      if (typeof domCanvas?.toBlob === "function") {
-        const blob = await new Promise((resolve, reject) => {
-          domCanvas.toBlob((value) => {
-            if (value) {
-              resolve(value);
-              return;
-            }
-            reject(new Error("Canvas toBlob() returned null"));
-          }, mime);
-        });
-        return new Uint8Array(await blob.arrayBuffer());
-      }
-
-      if (typeof domCanvas?.toDataURL === "function") {
-        const dataUrl = domCanvas.toDataURL(mime);
-        const base64 = dataUrl.split(",", 2)[1] ?? "";
-        const bytes = atob(base64);
-        const arr = new Uint8Array(bytes.length);
-        for (let i = 0; i < bytes.length; i++) {
-          arr[i] = bytes.charCodeAt(i);
-        }
-        return arr;
-      }
-
-      throw new Error("Canvas encoding fallback failed");
-    }
-  };
-
-  CanvasCtor.prototype.__wzExplorerPatchedGetBufferAsync = true;
-}
-
-function getWzApi() {
-  if (globalThis.wz && typeof globalThis.wz.init === "function") {
-    return globalThis.wz;
-  }
-  throw new Error("wz runtime not loaded. Expected ./vendor/wz.js");
-}
-
-async function assertWasmEndpoint(url) {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`WASM file not found at ${url} (${response.status})`);
-  }
-
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length < 4 || bytes[0] !== 0x00 || bytes[1] !== 0x61 || bytes[2] !== 0x73 || bytes[3] !== 0x6d) {
-    throw new Error(`WASM path resolved to non-binary content: ${url}`);
-  }
 }
 
 openBtn.addEventListener("click", async () => {
@@ -154,7 +91,7 @@ async function openWzFile(file) {
     const version = versionSelect.value;
     const wz = new wzApi.WzFile(file, wzApi.WzMapleVersion[version]);
     const parseInfo = { message: "" };
-    const ok = await wz.parseWzFile(parseInfo);
+    const ok = await wz.parseWzFile(parseInfo, true);
     if (!ok) {
       wz.dispose();
       finishParseProgress(false, "Parse failed");
@@ -163,12 +100,12 @@ async function openWzFile(file) {
     }
 
     currentWz = wz;
-    imageEntries = collectImages(wz.wzDirectory);
-    imageTreeRoot = buildImageTree(imageEntries);
+    imageRootNode = createDirNode(wz.wzDirectory, "");
+    await ensureDirectoryParsed(imageRootNode);
     expandedFolders = new Set();
     renderImageList();
     finishParseProgress(true, "Directory parse complete");
-    status(`Loaded ${imageEntries.length} IMG entries from ${file.name}`);
+    status(`Loaded ${file.name}. Expand folders for fast browsing, or filter to build full IMG index.`);
   } finally {
     openBtn.disabled = false;
   }
@@ -216,55 +153,53 @@ function clearParseProgressTimer() {
   }
 }
 
-function collectImages(rootDir) {
-  if (!rootDir) {
-    return [];
-  }
-
-  const out = [];
-  walkDirectory(rootDir, [], out);
-  out.sort((a, b) => a.path.localeCompare(b.path));
-  return out;
-}
-
-function walkDirectory(dir, prefix, out) {
-  for (const subDir of dir.wzDirectories) {
-    prefix.push(subDir.name);
-    walkDirectory(subDir, prefix, out);
-    prefix.pop();
-  }
-
-  for (const image of dir.wzImages) {
-    out.push({
-      path: [...prefix, image.name].join("/"),
-      image
-    });
-  }
-}
-
 function renderImageList() {
   imageListEl.innerHTML = "";
   const query = imageFilterInput.value.trim().toLowerCase();
   if (query) {
-    renderFilteredImageList(query);
+    void renderFilteredImageList(query);
     return;
   }
 
-  if (!imageTreeRoot || imageTreeRoot.children.length === 0) {
+  if (!imageRootNode || imageRootNode.children.length === 0) {
     const li = document.createElement("li");
     li.textContent = "(No IMG entries)";
     imageListEl.appendChild(li);
     return;
   }
 
-  renderImageTree(imageTreeRoot.children, 0);
+  renderImageTree(imageRootNode.children, 0);
 }
 
-function renderFilteredImageList(query) {
-  const visible = imageEntries
+async function renderFilteredImageList(query) {
+  const token = ++filterRenderToken;
+  if (!imageEntries) {
+    const li = document.createElement("li");
+    li.textContent = "(Indexing IMG entries for filter...)";
+    imageListEl.appendChild(li);
+    try {
+      await ensureImageIndexBuilt();
+    } catch (err) {
+      if (token !== filterRenderToken) {
+        return;
+      }
+      imageListEl.innerHTML = "";
+      const failed = document.createElement("li");
+      failed.textContent = "(Failed to build IMG index)";
+      imageListEl.appendChild(failed);
+      status(`IMG index build failed: ${errorText(err)}`);
+      return;
+    }
+    if (token !== filterRenderToken) {
+      return;
+    }
+  }
+
+  const visible = (imageEntries ?? [])
     .filter((entry) => entry.path.toLowerCase().includes(query))
     .slice(0, 4000);
 
+  imageListEl.innerHTML = "";
   if (visible.length === 0) {
     const li = document.createElement("li");
     li.textContent = "(No matching IMG entries)";
@@ -293,18 +228,35 @@ function renderImageTree(nodes, depth) {
       li.textContent = `${expandedFolders.has(node.path) ? "▾" : "▸"} ${node.name}/`;
       li.classList.add("folder-row");
       li.style.paddingLeft = `${8 + depth * 14}px`;
-      li.addEventListener("click", () => {
+      li.addEventListener("click", async () => {
         if (expandedFolders.has(node.path)) {
           expandedFolders.delete(node.path);
-        } else {
-          expandedFolders.add(node.path);
+          renderImageList();
+          return;
+        }
+
+        expandedFolders.add(node.path);
+        renderImageList();
+        try {
+          await ensureDirectoryParsed(node);
+        } catch (err) {
+          expandedFolders.delete(node.path);
+          status(`Failed to parse directory ${node.path}: ${errorText(err)}`);
         }
         renderImageList();
       });
       imageListEl.appendChild(li);
 
       if (expandedFolders.has(node.path)) {
-        renderImageTree(node.children, depth + 1);
+        if (!node.loaded) {
+          const loading = document.createElement("li");
+          loading.textContent = "(Loading...)";
+          loading.classList.add("folder-row");
+          loading.style.paddingLeft = `${22 + depth * 14}px`;
+          imageListEl.appendChild(loading);
+        } else {
+          renderImageTree(node.children, depth + 1);
+        }
       }
       continue;
     }
@@ -323,67 +275,125 @@ function renderImageTree(nodes, depth) {
   }
 }
 
-function buildImageTree(entries) {
-  const root = { kind: "dir", name: "", path: "", childrenMap: new Map() };
-
-  for (const entry of entries) {
-    const parts = entry.path.split("/").filter(Boolean);
-    if (parts.length === 0) {
-      continue;
-    }
-
-    let current = root;
-    let currentPath = "";
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLeaf = i === parts.length - 1;
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-
-      if (isLeaf) {
-        current.childrenMap.set(`file:${part}`, {
-          kind: "file",
-          name: part,
-          path: currentPath,
-          entry
-        });
-        continue;
-      }
-
-      const key = `dir:${part}`;
-      if (!current.childrenMap.has(key)) {
-        current.childrenMap.set(key, {
-          kind: "dir",
-          name: part,
-          path: currentPath,
-          childrenMap: new Map()
-        });
-      }
-      current = current.childrenMap.get(key);
-    }
-  }
-
-  return normalizeTree(root);
-}
-
-function normalizeTree(node) {
-  if (node.kind === "file") {
-    return node;
-  }
-
-  const children = [...node.childrenMap.values()].map((child) => normalizeTree(child));
-  children.sort((a, b) => {
-    if (a.kind !== b.kind) {
-      return a.kind === "dir" ? -1 : 1;
-    }
-    return a.name.localeCompare(b.name);
-  });
-
+function createDirNode(dir, path) {
   return {
     kind: "dir",
-    name: node.name,
-    path: node.path,
-    children
+    name: dir?.name ?? "",
+    path,
+    dir,
+    loaded: false,
+    loadingPromise: null,
+    children: []
   };
+}
+
+async function ensureDirectoryParsed(node) {
+  if (!node || node.kind !== "dir" || node.loaded) {
+    return;
+  }
+
+  if (node.loadingPromise) {
+    await node.loadingPromise;
+    return;
+  }
+
+  node.loadingPromise = (async () => {
+    if (!node.dir.parsed) {
+      await node.dir.parseDirectory(true);
+    }
+
+    const nextChildren = [];
+    for (const subDir of node.dir.wzDirectories) {
+      const subPath = node.path ? `${node.path}/${subDir.name}` : subDir.name;
+      nextChildren.push(createDirNode(subDir, subPath));
+    }
+    for (const image of node.dir.wzImages) {
+      const imgPath = node.path ? `${node.path}/${image.name}` : image.name;
+      nextChildren.push({
+        kind: "file",
+        name: image.name,
+        path: imgPath,
+        entry: {
+          path: imgPath,
+          image
+        }
+      });
+    }
+
+    nextChildren.sort((a, b) => {
+      if (a.kind !== b.kind) {
+        return a.kind === "dir" ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    node.children = nextChildren;
+    node.loaded = true;
+  })();
+
+  try {
+    await node.loadingPromise;
+  } finally {
+    node.loadingPromise = null;
+  }
+}
+
+async function ensureImageIndexBuilt() {
+  if (imageEntries) {
+    return imageEntries;
+  }
+  if (imageIndexBuildPromise) {
+    return imageIndexBuildPromise;
+  }
+  if (!currentWz?.wzDirectory) {
+    imageEntries = [];
+    return imageEntries;
+  }
+
+  status("Building full IMG index for filter...");
+  imageIndexBuildPromise = (async () => {
+    const out = [];
+    await collectImagesLazy(currentWz.wzDirectory, [], out, { dirsVisited: 0 });
+    out.sort((a, b) => a.path.localeCompare(b.path));
+    imageEntries = out;
+    status(`Indexed ${out.length} IMG entries. Filter is ready.`);
+    return out;
+  })();
+
+  try {
+    return await imageIndexBuildPromise;
+  } finally {
+    imageIndexBuildPromise = null;
+  }
+}
+
+async function collectImagesLazy(dir, prefix, out, state) {
+  if (!dir.parsed) {
+    await dir.parseDirectory(true);
+  }
+
+  for (const image of dir.wzImages) {
+    out.push({
+      path: [...prefix, image.name].join("/"),
+      image
+    });
+  }
+
+  for (const subDir of dir.wzDirectories) {
+    prefix.push(subDir.name);
+    await collectImagesLazy(subDir, prefix, out, state);
+    prefix.pop();
+    state.dirsVisited++;
+    if (state.dirsVisited % 25 === 0) {
+      await yieldToMainThread();
+    }
+  }
+}
+
+function yieldToMainThread() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 async function openImage(entry) {
@@ -397,7 +407,7 @@ async function openImage(entry) {
   const props = [...selectedImage.wzProperties];
 
   renderPropertyTree(props);
-  const canvases = collectCanvasProps(props);
+  const canvases = collectCanvasProps(props, wzApi);
   renderCanvasList(canvases);
   downloadXmlBtn.disabled = false;
   downloadPngZipBtn.disabled = canvases.length === 0;
@@ -435,57 +445,6 @@ function renderPropertyNode(prop) {
     li.appendChild(ul);
   }
   return li;
-}
-
-function getPropertyChildren(prop) {
-  const childrenSet = prop?.wzProperties;
-  if (!childrenSet || typeof childrenSet[Symbol.iterator] !== "function") {
-    return [];
-  }
-  return [...childrenSet];
-}
-
-function formatValue(value) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (typeof value === "bigint") {
-    return `${String(value)}n`;
-  }
-  if (typeof value === "object") {
-    if ("x" in value && "y" in value) {
-      return `(${value.x}, ${value.y})`;
-    }
-    return "[object]";
-  }
-  return String(value);
-}
-
-function collectCanvasProps(properties) {
-  const out = [];
-  const path = [];
-  walkPropsForCanvas(properties, path, out);
-  return out;
-}
-
-function walkPropsForCanvas(properties, path, out) {
-  for (const prop of properties) {
-    path.push(prop.name ?? "(unnamed)");
-    if (prop instanceof wzApi.WzCanvasProperty) {
-      out.push({
-        path: path.join("/"),
-        prop
-      });
-    }
-    const children = getPropertyChildren(prop);
-    if (children.length > 0) {
-      walkPropsForCanvas(children, path, out);
-    }
-    path.pop();
-  }
 }
 
 function renderCanvasList(canvases) {
@@ -544,60 +503,11 @@ async function showCanvas(canvasEntry) {
   }
 }
 
-async function canvasToPngBytes(canvasLike) {
-  // Prefer DOM canvas paths first; @tybys/wz 1.0.0 has a browser bug
-  // where Canvas.getBufferAsync() delegates to a missing _canvas method.
-  const domCanvas =
-    canvasLike?._canvas ??
-    (typeof canvasLike?.getCanvas === "function" ? canvasLike.getCanvas() : canvasLike);
-
-  if (typeof domCanvas?.toBlob === "function") {
-    const blob = await new Promise((resolve, reject) => {
-      domCanvas.toBlob((value) => {
-        if (value) {
-          resolve(value);
-          return;
-        }
-        reject(new Error("Canvas toBlob() returned null"));
-      }, "image/png");
-    });
-    return new Uint8Array(await blob.arrayBuffer());
-  }
-
-  if (typeof domCanvas?.toDataURL === "function") {
-    const dataUrl = domCanvas.toDataURL("image/png");
-    const base64 = dataUrl.split(",", 2)[1] ?? "";
-    const bytes = atob(base64);
-    const arr = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) {
-      arr[i] = bytes.charCodeAt(i);
-    }
-    return arr;
-  }
-
-  if (typeof canvasLike?.getBufferAsync === "function") {
-    return canvasLike.getBufferAsync("image/png");
-  }
-
-  throw new Error("Unsupported canvas object shape for PNG encoding");
-}
-
-function populateVersionSelect() {
-  const keys = Object.keys(wzApi.WzMapleVersion).filter((k) => Number.isNaN(Number(k)));
-  for (const key of keys) {
-    const option = document.createElement("option");
-    option.value = key;
-    option.textContent = key;
-    if (key === "GMS") {
-      option.selected = true;
-    }
-    versionSelect.appendChild(option);
-  }
-}
-
 function clearImageState() {
-  imageEntries = [];
-  imageTreeRoot = null;
+  imageEntries = null;
+  imageRootNode = null;
+  imageIndexBuildPromise = null;
+  filterRenderToken++;
   expandedFolders = new Set();
   selectedImage = null;
   selectedImagePath = "";
@@ -628,7 +538,7 @@ async function exportSelectedImageXml() {
   }
 
   try {
-    const xml = buildSelectedImageXml();
+    const xml = buildSelectedImageXml(selectedImage, selectedImagePath, wzApi);
     const fileName = `${sanitizeFileName(selectedImagePath)}.xml`;
     downloadBlob(new Blob([xml], { type: "application/xml;charset=utf-8" }), fileName);
     status(`Downloaded XML: ${fileName}`);
@@ -691,59 +601,6 @@ async function exportSelectedImagePngZip() {
   }
 }
 
-function buildSelectedImageXml() {
-  const props = [...selectedImage.wzProperties];
-  const lines = [];
-  lines.push('<?xml version="1.0" encoding="UTF-8"?>');
-  lines.push(`<WzImage path="${escapeXml(selectedImagePath)}">`);
-  for (const prop of props) {
-    writePropertyXml(prop, 1, lines);
-  }
-  lines.push("</WzImage>");
-  return lines.join("\n");
-}
-
-function writePropertyXml(prop, depth, outLines) {
-  const indent = "  ".repeat(depth);
-  const typeName = prop?.constructor?.name ?? "Property";
-  const name = prop?.name ?? "";
-  const children = getPropertyChildren(prop);
-  const valueText = formatValue(prop?.wzValue);
-  const attrs = [`type="${escapeXml(typeName)}"`, `name="${escapeXml(name)}"`];
-
-  if (prop instanceof wzApi.WzCanvasProperty && prop?.pngProperty) {
-    attrs.push(`width="${prop.pngProperty.width}"`);
-    attrs.push(`height="${prop.pngProperty.height}"`);
-  }
-
-  if (children.length === 0) {
-    if (valueText) {
-      attrs.push(`value="${escapeXml(valueText)}"`);
-    }
-    outLines.push(`${indent}<Property ${attrs.join(" ")} />`);
-    return;
-  }
-
-  outLines.push(`${indent}<Property ${attrs.join(" ")}>`);  
-  for (const child of children) {
-    writePropertyXml(child, depth + 1, outLines);
-  }
-  outLines.push(`${indent}</Property>`);
-}
-
-function sanitizeFileName(value) {
-  return value.replace(/[\\/:*?"<>|]+/g, "_");
-}
-
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function disposeCurrentWz() {
   if (!currentWz) {
     return;
@@ -752,31 +609,6 @@ function disposeCurrentWz() {
   currentWz = null;
 }
 
-function escapeXml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 function status(message) {
   statusEl.textContent = message;
-}
-
-function errorText(err) {
-  if (err?.message) {
-    return err.message;
-  }
-  return String(err);
-}
-
-function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
 }
